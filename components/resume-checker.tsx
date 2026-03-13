@@ -76,6 +76,7 @@ function getScoreTone(score: number) {
 export default function ResumeChecker({ id }: ResumeCheckerProps) {
   const [linkedinUrl, setLinkedinUrl] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [jobFetchLoading, setJobFetchLoading] = useState(false);
   const [jobFetchError, setJobFetchError] = useState("");
@@ -97,7 +98,8 @@ export default function ResumeChecker({ id }: ResumeCheckerProps) {
     jobDetailsDraft.jobTitle.trim().length > 0 &&
     jobDetailsDraft.company.trim().length > 0 &&
     jobDetailsDraft.description.trim().length > 0;
-  const canAnalyze = Boolean(resumeFile) && hasReadyJobDetails && !loading && !jobFetchLoading;
+  const canAnalyze =
+    Boolean(resumeFile) && hasReadyJobDetails && acceptedTerms && !loading && !jobFetchLoading;
 
   useEffect(() => {
     const trimmedUrl = linkedinUrl.trim();
@@ -221,6 +223,11 @@ export default function ResumeChecker({ id }: ResumeCheckerProps) {
 
     if (!hasReadyJobDetails) {
       setError("Job details are not ready yet. Please wait for fetch or edit missing fields.");
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setError("Please accept the Terms and Conditions before analyzing your resume.");
       return;
     }
 
@@ -443,6 +450,41 @@ ${jobDetailsDraft.description}
                 />
               </div>
 
+              <Card className="border-amber-300/40 bg-amber-500/5">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Terms and Conditions</CardTitle>
+                  <CardDescription>
+                    Please review this data and AI usage notice before running analysis.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-muted-foreground">
+                  <ul className="space-y-2">
+                    <li>By continuing, you confirm you have permission to upload and process this resume data.</li>
+                    <li>
+                      Resume content and job details are sent to third-party AI services via OpenRouter for analysis, and those providers may include public or free-tier models.
+                    </li>
+                    <li>Do not submit highly sensitive personal data that you do not want processed by external AI providers.</li>
+                    <li>This tool is informational only and does not guarantee interview outcomes or hiring decisions.</li>
+                  </ul>
+
+                  <label htmlFor="accept-terms" className="flex items-start gap-2 rounded-md border border-border/60 bg-background/70 px-3 py-2">
+                    <input
+                      id="accept-terms"
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 rounded border-border"
+                      checked={acceptedTerms}
+                      onChange={(e) => {
+                        setAcceptedTerms(e.target.checked);
+                        setError("");
+                      }}
+                    />
+                    <span className="text-sm text-foreground">
+                      I acknowledge and agree to the Terms and Conditions above.
+                    </span>
+                  </label>
+                </CardContent>
+              </Card>
+
               {error ? (
                 <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   <AlertCircle className="mt-0.5 size-4" />
@@ -452,7 +494,7 @@ ${jobDetailsDraft.description}
 
               {!canAnalyze ? (
                 <p className="text-xs text-muted-foreground">
-                  Analyze is enabled after resume upload and valid job details are fetched.
+                  Analyze is enabled after resume upload, valid job details are fetched, and terms are acknowledged.
                 </p>
               ) : null}
 

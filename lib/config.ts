@@ -1,8 +1,8 @@
-// Configuration for LM Studio and other settings
+// Configuration for OpenRouter and other settings
 export const config = {
-  lmStudio: {
-    baseURL: process.env.LM_STUDIO_BASE_URL || "http://localhost:1234/v1",
-    apiKey: "lm-studio", // LM Studio doesn't require a real API key
-    model: process.env.LM_STUDIO_MODEL || "qwen/qwen3-1.7b",
+  openRouter: {
+    baseURL: process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
+    apiKey: process.env.OPENROUTER_API_KEY || "",
+    model: process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash",
   },
 };

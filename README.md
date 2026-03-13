@@ -1,12 +1,12 @@
 # LinkedIn Resume Review App
 
-An AI-powered web application that compares your resume against LinkedIn job postings using local AI through LM Studio.
+An AI-powered web application that compares your resume against LinkedIn job postings using AI models via OpenRouter.
 
 ## Features
 
 - 📝 Upload your resume (PDF or DOCX)
 - 🔗 Paste LinkedIn job posting URL
-- 🤖 AI-powered analysis using local LM Studio
+- 🤖 AI-powered analysis using OpenRouter models
 - 📊 Get match score and detailed feedback
 - ✅ Identify strengths and gaps
 - 💡 Receive personalized recommendations
@@ -14,10 +14,7 @@ An AI-powered web application that compares your resume against LinkedIn job pos
 ## Prerequisites
 
 1. **Node.js** (v18 or higher)
-2. **LM Studio** - Download from [https://lmstudio.ai/](https://lmstudio.ai/)
-   - Install and run LM Studio
-   - Download a model (recommended: Llama 3 or similar)
-   - Start the local server (default: http://localhost:1234)
+2. **OpenRouter API Key** - Get one from [https://openrouter.ai/](https://openrouter.ai/)
 
 ## Setup
 
@@ -26,12 +23,13 @@ An AI-powered web application that compares your resume against LinkedIn job pos
    npm install
    ```
 
-2. **Configure LM Studio:**
-   - Open LM Studio
-   - Load your preferred model
-   - Go to "Local Server" tab
-   - Click "Start Server"
-   - Ensure it's running on `http://localhost:1234` (default)
+2. **Configure Environment Variables:**
+   - Copy `.env.example` to `.env.local`
+   - Add your OpenRouter API key:
+     ```env
+     OPENROUTER_API_KEY=your_api_key_here
+     OPENROUTER_MODEL=google/gemini-2.5-flash
+     ```
 
 3. **Run the development server:**
    ```bash
@@ -63,17 +61,16 @@ An AI-powered web application that compares your resume against LinkedIn job pos
 
 ## Configuration
 
-### LM Studio Settings
+### OpenRouter Settings
 
-If your LM Studio is running on a different port or host, update the configuration in:
-`app/api/compare/route.ts`
+You can change the default model and API key in `.env.local`:
 
-```typescript
-const openai = new OpenAI({
-  baseURL: "http://localhost:1234/v1", // Change this if needed
-  apiKey: "lm-studio",
-});
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_MODEL=google/gemini-2.5-flash
 ```
+
+For advanced configuration, update `lib/config.ts`.
 
 ### Scraping Limitations
 
@@ -88,7 +85,7 @@ Note: LinkedIn may block automated scraping. For production use, consider:
 - **Framework:** Next.js 16 with App Router
 - **Language:** TypeScript
 - **Styling:** Tailwind CSS
-- **AI:** OpenAI SDK (connecting to LM Studio)
+- **AI:** OpenAI SDK (connecting to OpenRouter)
 - **Resume Parsing:** pdf-parse, mammoth
 - **Web Scraping:** cheerio
 

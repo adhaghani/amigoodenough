@@ -3,10 +3,14 @@ import * as cheerio from "cheerio";
 import OpenAI from "openai";
 import { config } from "@/lib/config";
 
-// Initialize OpenAI client to connect to LM Studio
+// Initialize OpenAI client to connect to OpenRouter
 const openai = new OpenAI({
-  baseURL: config.lmStudio.baseURL,
-  apiKey: config.lmStudio.apiKey,
+  baseURL: config.openRouter.baseURL,
+  apiKey: config.openRouter.apiKey,
+  defaultHeaders: {
+    "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000", // Optional, for including your app on openrouter.ai rankings.
+    "X-Title": "Am I Good Enough?", // Optional. Shows in rankings on openrouter.ai.
+  },
 });
 
 async function scrapeLinkedInJob(url: string): Promise<string> {
@@ -97,7 +101,7 @@ Respond in JSON format with the following structure:
 }`;
 
     const completion = await openai.chat.completions.create({
-      model: config.lmStudio.model,
+      model: config.openRouter.model,
       messages: [
         {
           role: "system",
@@ -111,6 +115,11 @@ Respond in JSON format with the following structure:
       temperature: 0.7,
       max_tokens: 2000,
     });
+    
+    if (!completion.choices) {
+      console.error("OpenRouter API returned an unexpected response:", JSON.stringify(completion, null, 2));
+      throw new Error("Invalid response structure from OpenRouter API.");
+    }
 
     const responseText = completion.choices[0]?.message?.content || "";
     

@@ -1,7 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { Upload, Link2, CheckCircle2, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, FileText, Lightbulb, Link2, Loader2, RefreshCw, Upload } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface ComparisonResult {
   matchScore: number;
@@ -11,21 +22,190 @@ interface ComparisonResult {
   summary: string;
 }
 
-export default function ResumeChecker() {
+interface ResumeCheckerProps {
+  id?: string;
+}
+
+interface JobDetailsResponse {
+  jobTitle: string;
+  company: string;
+  location: string;
+  description: string;
+  rawJobInfo: string;
+  fetchedAt: string;
+}
+
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const VALID_FILE_TYPES = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+];
+const JOB_FETCH_DEBOUNCE_MS = 700;
+
+function isLinkedInJobUrl(url: string) {
+  return /linkedin\.com\/jobs/i.test(url);
+}
+
+function getScoreTone(score: number) {
+  if (score >= 75) {
+    return {
+      label: "Strong fit",
+      badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+      progressClass: "bg-emerald-600",
+      cardClass: "border-emerald-300/40 bg-emerald-500/5",
+    };
+  }
+
+  if (score >= 50) {
+    return {
+      label: "Moderate fit",
+      badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+      progressClass: "bg-amber-600",
+      cardClass: "border-amber-300/40 bg-amber-500/5",
+    };
+  }
+
+  return {
+    label: "Low fit",
+    badgeClass: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    progressClass: "bg-rose-600",
+    cardClass: "border-rose-300/40 bg-rose-500/5",
+  };
+}
+
+export default function ResumeChecker({ id }: ResumeCheckerProps) {
   const [linkedinUrl, setLinkedinUrl] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [jobFetchLoading, setJobFetchLoading] = useState(false);
+  const [jobFetchError, setJobFetchError] = useState("");
+  const [jobDetails, setJobDetails] = useState<JobDetailsResponse | null>(null);
+  const [jobDetailsDraft, setJobDetailsDraft] = useState({
+    jobTitle: "",
+    company: "",
+    location: "",
+    description: "",
+  });
+  const [jobRefreshKey, setJobRefreshKey] = useState(0);
   const [result, setResult] = useState<ComparisonResult | null>(null);
   const [error, setError] = useState("");
+  const lastFetchedUrlRef = useRef("");
+  const fetchIdRef = useRef(0);
+
+  const canFetchLinkedIn = isLinkedInJobUrl(linkedinUrl.trim());
+  const hasReadyJobDetails =
+    jobDetailsDraft.jobTitle.trim().length > 0 &&
+    jobDetailsDraft.company.trim().length > 0 &&
+    jobDetailsDraft.description.trim().length > 0;
+  const canAnalyze = Boolean(resumeFile) && hasReadyJobDetails && !loading && !jobFetchLoading;
+
+  useEffect(() => {
+    const trimmedUrl = linkedinUrl.trim();
+
+    if (!trimmedUrl) {
+      setJobFetchError("");
+      setJobFetchLoading(false);
+      setJobDetails(null);
+      setJobDetailsDraft({
+        jobTitle: "",
+        company: "",
+        location: "",
+        description: "",
+      });
+      lastFetchedUrlRef.current = "";
+      return;
+    }
+
+    if (!isLinkedInJobUrl(trimmedUrl)) {
+      setJobFetchLoading(false);
+      setJobFetchError("Please provide a valid LinkedIn jobs URL to fetch job details.");
+      setJobDetails(null);
+      setJobDetailsDraft({
+        jobTitle: "",
+        company: "",
+        location: "",
+        description: "",
+      });
+      lastFetchedUrlRef.current = "";
+      return;
+    }
+
+    const abortController = new AbortController();
+    const requestId = ++fetchIdRef.current;
+    const timeoutId = setTimeout(async () => {
+      setJobFetchLoading(true);
+      setJobFetchError("");
+
+      try {
+        const response = await fetch("/api/fetch-job-details", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ linkedinUrl: trimmedUrl }),
+          signal: abortController.signal,
+        });
+
+        const payload = await response.json();
+
+        if (requestId !== fetchIdRef.current) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to fetch job details");
+        }
+
+        setJobDetails(payload as JobDetailsResponse);
+        setJobDetailsDraft({
+          jobTitle: payload.jobTitle || "",
+          company: payload.company || "",
+          location: payload.location || "",
+          description: payload.description || "",
+        });
+        setResult(null);
+        setError("");
+        lastFetchedUrlRef.current = trimmedUrl;
+      } catch (err) {
+        if (abortController.signal.aborted || requestId !== fetchIdRef.current) {
+          return;
+        }
+
+        setJobDetails(null);
+        setJobDetailsDraft({
+          jobTitle: "",
+          company: "",
+          location: "",
+          description: "",
+        });
+        setJobFetchError(err instanceof Error ? err.message : "Failed to fetch job details");
+        lastFetchedUrlRef.current = "";
+      } finally {
+        if (requestId === fetchIdRef.current) {
+          setJobFetchLoading(false);
+        }
+      }
+    }, JOB_FETCH_DEBOUNCE_MS);
+
+    return () => {
+      abortController.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [linkedinUrl, jobRefreshKey]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const validTypes = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
-      if (!validTypes.includes(file.type)) {
+      if (!VALID_FILE_TYPES.includes(file.type)) {
         setError("Please upload a PDF or DOCX file");
         return;
       }
+
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        setError("File size must be 10MB or less");
+        return;
+      }
+
       setResumeFile(file);
       setError("");
     }
@@ -36,6 +216,11 @@ export default function ResumeChecker() {
     
     if (!linkedinUrl || !resumeFile) {
       setError("Please provide both LinkedIn URL and resume file");
+      return;
+    }
+
+    if (!hasReadyJobDetails) {
+      setError("Job details are not ready yet. Please wait for fetch or edit missing fields.");
       return;
     }
 
@@ -68,6 +253,14 @@ export default function ResumeChecker() {
         body: JSON.stringify({
           linkedinUrl,
           resumeText,
+          jobPosting: `
+Job Title: ${jobDetailsDraft.jobTitle}
+Company: ${jobDetailsDraft.company}
+Location: ${jobDetailsDraft.location}
+
+Job Description:
+${jobDetailsDraft.description}
+          `.trim(),
         }),
       });
 
@@ -86,182 +279,312 @@ export default function ResumeChecker() {
   };
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-slate-50 to-slate-100 py-12 px-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-slate-900 mb-2">
-            Resume Reviewer
-          </h1>
-          <p className="text-slate-600">
-            Compare your resume against LinkedIn job postings with AI-powered analysis
+    <section id={id} className="px-4 py-16 sm:px-6 sm:py-20">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-8 max-w-2xl">
+          <Badge variant="secondary" className="rounded-full px-3 py-1 uppercase tracking-[0.12em]">
+            Resume checker
+          </Badge>
+          <h2 className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">Check role fit before applying</h2>
+          <p className="mt-3 text-muted-foreground">
+            Paste the LinkedIn posting URL and upload your resume to generate a score, strengths, gaps, and targeted recommendations.
           </p>
         </div>
 
-        <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* LinkedIn URL Input */}
-            <div>
-              <label htmlFor="linkedin-url" className="block text-sm font-medium text-slate-700 mb-2">
-                <Link2 className="inline w-4 h-4 mr-1" />
-                LinkedIn Job Posting URL
-              </label>
-              <input
-                id="linkedin-url"
-                type="url"
-                value={linkedinUrl}
-                onChange={(e) => setLinkedinUrl(e.target.value)}
-                placeholder="https://www.linkedin.com/jobs/view/..."
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
-            </div>
+        <Card className="mb-8 mx-auto border-border/70">
+          <CardHeader>
+            <CardTitle className="text-xl">Run an analysis</CardTitle>
+            <CardDescription>
+              Tip: if a LinkedIn post is blocked, retry with another public listing.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="linkedin-url" className="flex items-center gap-2">
+                  <Link2 className="size-4" />
+                  LinkedIn job posting URL
+                </Label>
+                <Input
+                  id="linkedin-url"
+                  type="url"
+                  value={linkedinUrl}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    setLinkedinUrl(nextValue);
+                    setResult(null);
+                    setError("");
 
-            {/* Resume Upload */}
-            <div>
-              <label htmlFor="resume-upload" className="block text-sm font-medium text-slate-700 mb-2">
-                <Upload className="inline w-4 h-4 mr-1" />
-                Upload Your Resume
-              </label>
-              <div className="flex items-center justify-center w-full">
+                    if (nextValue.trim() !== lastFetchedUrlRef.current) {
+                      setJobDetails(null);
+                      setJobDetailsDraft({
+                        jobTitle: "",
+                        company: "",
+                        location: "",
+                        description: "",
+                      });
+                    }
+                  }}
+                  placeholder="https://www.linkedin.com/jobs/view/..."
+                  required
+                />
+                <div className="flex min-h-5 items-center justify-between text-xs text-muted-foreground">
+                  <span>
+                    {jobFetchLoading
+                      ? "Fetching job details..."
+                      : canFetchLinkedIn && jobDetails
+                        ? `Job details fetched ${new Date(jobDetails.fetchedAt).toLocaleTimeString()}`
+                        : "Paste a LinkedIn jobs URL to auto-fetch details"}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2"
+                    onClick={() => setJobRefreshKey((value) => value + 1)}
+                    disabled={!canFetchLinkedIn || jobFetchLoading}
+                  >
+                    <RefreshCw className={`size-3 ${jobFetchLoading ? "animate-spin" : ""}`} />
+                    Refresh
+                  </Button>
+                </div>
+              </div>
+
+              {(jobFetchError || jobDetails) && (
+                <Card className="border-border/70 bg-muted/20">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Fetched job details</CardTitle>
+                    <CardDescription>
+                      Review and edit these fields before analyzing your resume.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {jobFetchError ? (
+                      <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                        <AlertCircle className="mt-0.5 size-4" />
+                        <p>{jobFetchError}</p>
+                      </div>
+                    ) : null}
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="job-title">Job title</Label>
+                        <Input
+                          id="job-title"
+                          value={jobDetailsDraft.jobTitle}
+                          onChange={(e) =>
+                            setJobDetailsDraft((prev) => ({ ...prev, jobTitle: e.target.value }))
+                          }
+                          placeholder="Job title"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="job-company">Company</Label>
+                        <Input
+                          id="job-company"
+                          value={jobDetailsDraft.company}
+                          onChange={(e) =>
+                            setJobDetailsDraft((prev) => ({ ...prev, company: e.target.value }))
+                          }
+                          placeholder="Company"
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="job-location">Location</Label>
+                        <Input
+                          id="job-location"
+                          value={jobDetailsDraft.location}
+                          onChange={(e) =>
+                            setJobDetailsDraft((prev) => ({ ...prev, location: e.target.value }))
+                          }
+                          placeholder="Location"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="job-description">Job description</Label>
+                      <textarea
+                        id="job-description"
+                        value={jobDetailsDraft.description}
+                        onChange={(e) =>
+                          setJobDetailsDraft((prev) => ({ ...prev, description: e.target.value }))
+                        }
+                        placeholder="Job description"
+                        rows={9}
+                        className="flex min-h-32 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="resume-upload" className="flex items-center gap-2">
+                  <Upload className="size-4" />
+                  Resume file
+                </Label>
                 <label
                   htmlFor="resume-upload"
-                  className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100"
+                  className="flex w-full cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 px-6 py-9 text-center transition-colors hover:bg-muted/50"
                 >
-                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="w-8 h-8 mb-2 text-slate-500" />
-                    <p className="mb-2 text-sm text-slate-500">
-                      <span className="font-semibold">Click to upload</span> or drag and drop
-                    </p>
-                    <p className="text-xs text-slate-500">PDF or DOCX (MAX. 10MB)</p>
-                    {resumeFile && (
-                      <p className="mt-2 text-sm text-blue-600 font-medium">
-                        {resumeFile.name}
-                      </p>
-                    )}
-                  </div>
-                  <input
-                    id="resume-upload"
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.docx"
-                    onChange={handleFileChange}
-                    required
-                  />
+                  <FileText className="mb-3 size-7 text-muted-foreground" />
+                  <p className="text-sm font-medium">Click to upload your resume</p>
+                  <p className="mt-1 text-xs text-muted-foreground">PDF or DOCX, up to 10MB</p>
+                  {resumeFile ? <p className="mt-2 text-sm text-foreground">{resumeFile.name}</p> : null}
                 </label>
+                <Input
+                  id="resume-upload"
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.docx"
+                  onChange={handleFileChange}
+                  required
+                />
               </div>
-            </div>
 
-            {/* Error Message */}
-            {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-                {error}
-              </div>
-            )}
+              {error ? (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <AlertCircle className="mt-0.5 size-4" />
+                  <p>{error}</p>
+                </div>
+              ) : null}
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Analyzing Resume...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-5 h-5 mr-2" />
-                  Check My Resume
-                </>
-              )}
-            </button>
-          </form>
-        </div>
+              {!canAnalyze ? (
+                <p className="text-xs text-muted-foreground">
+                  Analyze is enabled after resume upload and valid job details are fetched.
+                </p>
+              ) : null}
 
-        {/* Results Display */}
+              <Button type="submit" disabled={!canAnalyze} size="lg" className="w-full sm:w-auto">
+                {loading ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Analyzing resume...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="size-4" />
+                    Check my resume
+                  </>
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
         {result && (
-          <div className="bg-white rounded-lg shadow-lg p-8 space-y-6">
-            <div className="border-b border-slate-200 pb-4">
-              <h2 className="text-2xl font-bold text-slate-900 mb-2">Analysis Results</h2>
-              <div className="flex items-center">
-                <span className="text-sm text-slate-600 mr-2">Match Score:</span>
-                <div className="flex-1 bg-slate-200 rounded-full h-3 max-w-xs">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-12">
+            <Card className={`border-border/70 md:col-span-1 lg:col-span-5 ${getScoreTone(result.matchScore).cardClass}`}>
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>Match score</CardTitle>
+                    <CardDescription>How your resume aligns with this role.</CardDescription>
+                  </div>
+                  <Badge className={getScoreTone(result.matchScore).badgeClass}>{getScoreTone(result.matchScore).label}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-3 flex items-end justify-between">
+                  <span className="text-sm text-muted-foreground">Overall alignment</span>
+                  <span className="text-3xl font-semibold tracking-tight">{result.matchScore}%</span>
+                </div>
+                <div className="h-2.5 w-full rounded-full bg-background/70">
                   <div
-                    className="bg-linear-to-r from-blue-500 to-blue-600 h-3 rounded-full"
+                    className={`h-2.5 rounded-full transition-all ${getScoreTone(result.matchScore).progressClass}`}
                     style={{ width: `${result.matchScore}%` }}
                   />
                 </div>
-                <span className="ml-2 font-bold text-lg text-blue-600">
-                  {result.matchScore}%
-                </span>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            {/* Summary */}
-            {result.summary && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="font-semibold text-slate-900 mb-2">Summary</h3>
-                <p className="text-slate-700">{result.summary}</p>
-              </div>
-            )}
+            {result.summary ? (
+              <Card className="border-border/70 bg-muted/20 md:col-span-1 lg:col-span-7">
+                <CardHeader>
+                  <CardTitle>Summary</CardTitle>
+                  <CardDescription>Quick view of your current fit and profile positioning.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm leading-6 text-muted-foreground">{result.summary}</p>
+                </CardContent>
+              </Card>
+            ) : null}
 
-            {/* Strengths */}
-            {result.strengths && result.strengths.length > 0 && (
-              <div>
-                <h3 className="font-semibold text-slate-900 mb-3 flex items-center">
-                  <CheckCircle2 className="w-5 h-5 mr-2 text-green-600" />
-                  Your Strengths
-                </h3>
-                <ul className="space-y-2">
-                  {result.strengths.map((strength, index) => (
-                    <li key={index} className="flex items-start">
-                      <span className="text-green-600 mr-2">✓</span>
-                      <span className="text-slate-700">{strength}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {result.strengths && result.strengths.length > 0 ? (
+              <Card className="border-emerald-300/40 bg-emerald-500/5 md:col-span-1 lg:col-span-6">
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-300" />
+                      Strengths
+                    </CardTitle>
+                    <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">{result.strengths.length}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2">
+                    {result.strengths.map((strength, index) => (
+                      <li key={index} className="flex items-start gap-2 text-sm text-muted-foreground">
+                        <span className="mt-1 size-1.5 rounded-full bg-emerald-600" />
+                        <span>{strength}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            ) : null}
 
-            {/* Gaps */}
-            {result.gaps && result.gaps.length > 0 && (
-              <div>
-                <h3 className="font-semibold text-slate-900 mb-3 flex items-center">
-                  <span className="text-red-600 mr-2">⚠️</span>
-                  Missing Skills/Experience
-                </h3>
-                <ul className="space-y-2">
-                  {result.gaps.map((gap, index) => (
-                    <li key={index} className="flex items-start">
-                      <span className="text-red-600 mr-2">×</span>
-                      <span className="text-slate-700">{gap}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {result.gaps && result.gaps.length > 0 ? (
+              <Card className="border-rose-300/40 bg-rose-500/5 md:col-span-1 lg:col-span-6">
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <AlertCircle className="size-4 text-rose-600 dark:text-rose-300" />
+                      Missing requirements
+                    </CardTitle>
+                    <Badge className="bg-rose-500/15 text-rose-700 dark:text-rose-300">{result.gaps.length}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2">
+                    {result.gaps.map((gap, index) => (
+                      <li key={index} className="flex items-start gap-2 text-sm text-muted-foreground">
+                        <span className="mt-1 size-1.5 rounded-full bg-rose-600" />
+                        <span>{gap}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            ) : null}
 
-            {/* Recommendations */}
-            {result.recommendations && result.recommendations.length > 0 && (
-              <div>
-                <h3 className="font-semibold text-slate-900 mb-3 flex items-center">
-                  <span className="text-blue-600 mr-2">💡</span>
-                  Recommendations
-                </h3>
-                <ul className="space-y-2">
-                  {result.recommendations.map((rec, index) => (
-                    <li key={index} className="flex items-start">
-                      <span className="text-blue-600 mr-2">→</span>
-                      <span className="text-slate-700">{rec}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {result.recommendations && result.recommendations.length > 0 ? (
+              <Card className="border-sky-300/40 bg-sky-500/5 md:col-span-2 lg:col-span-12">
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <Lightbulb className="size-4 text-sky-600 dark:text-sky-300" />
+                      Recommendations
+                    </CardTitle>
+                    <Badge className="bg-sky-500/15 text-sky-700 dark:text-sky-300">{result.recommendations.length}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ul className="grid gap-2 md:grid-cols-2">
+                    {result.recommendations.map((recommendation, index) => (
+                      <li key={index} className="flex items-start gap-2 text-sm text-muted-foreground">
+                        <span className="mt-1 size-1.5 rounded-full bg-sky-600" />
+                        <span>{recommendation}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

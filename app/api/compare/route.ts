@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import * as cheerio from "cheerio";
 import OpenAI from "openai";
 import { config } from "@/lib/config";
+import { scrapeLinkedInJobDetails, buildJobPosting } from "@/lib/linkedin-job";
 
 // Initialize OpenAI client to connect to OpenRouter
 const openai = new OpenAI({
@@ -12,56 +12,6 @@ const openai = new OpenAI({
     "X-Title": "Am I Good Enough?", // Optional. Shows in rankings on openrouter.ai.
   },
 });
-
-async function scrapeLinkedInJob(url: string): Promise<string> {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch LinkedIn job posting");
-    }
-
-    const html = await response.text();
-    const $ = cheerio.load(html);
-
-    // Extract job information from LinkedIn
-    const jobTitle = $("h1.top-card-layout__title").text().trim() ||
-                     $("h1").first().text().trim();
-    
-    const companyName = $("a.topcard__org-name-link").text().trim() ||
-                       $(".topcard__org-name-link").text().trim();
-    
-    const jobDescription = $(".show-more-less-html__markup").text().trim() ||
-                          $(".description__text").text().trim() ||
-                          $("article").text().trim();
-
-    const location = $(".topcard__flavor--bullet").text().trim();
-
-    // Combine all extracted information
-    const jobInfo = `
-Job Title: ${jobTitle}
-Company: ${companyName}
-Location: ${location}
-
-Job Description:
-${jobDescription}
-    `.trim();
-
-    if (!jobInfo || jobInfo.length < 100) {
-      throw new Error("Could not extract sufficient job information");
-    }
-
-    return jobInfo;
-  } catch (error) {
-    console.error("Error scraping LinkedIn:", error);
-    throw new Error("Failed to retrieve job posting information");
-  }
-}
 
 interface AnalysisResult {
   matchScore: number;
@@ -151,7 +101,7 @@ Respond in JSON format with the following structure:
 
 export async function POST(request: NextRequest) {
   try {
-    const { linkedinUrl, resumeText } = await request.json();
+    const { linkedinUrl, resumeText, jobPosting } = await request.json();
 
     if (!linkedinUrl || !resumeText) {
       return NextResponse.json(
@@ -168,11 +118,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Scrape job posting
-    const jobPosting = await scrapeLinkedInJob(linkedinUrl);
+    const effectiveJobPosting =
+      typeof jobPosting === "string" && jobPosting.trim().length > 0
+        ? jobPosting.trim()
+        : buildJobPosting(await scrapeLinkedInJobDetails(linkedinUrl));
 
     // Analyze with AI
-    const analysis = await analyzeWithAI(jobPosting, resumeText);
+    const analysis = await analyzeWithAI(effectiveJobPosting, resumeText);
 
     return NextResponse.json(analysis);
   } catch (error) {
